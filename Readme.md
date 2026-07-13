@@ -34,7 +34,7 @@ plink --vcf snps_merged.integer.maf01.geno5.final.vcf.gz \
        --make-bed \
        --out snps_merged.integer.maf01.geno5.final
 ```
-## Run fastStrucutre for K=1 to K=8 (or more if needed 
+## Run fastStrucutre for K=1 to K=8 (or more if needed)
 ```bash
 structure.py -K1 \
   --input snps_merged.integer.maf001.geno75.final \
@@ -46,3 +46,88 @@ Model components used to explain structure in data = the smallest K that adequat
 ```bash
 chooseK.py --input=fs_geno75
 ```
+# Graph K values using R
+## Load necessary libraries 
+```bash
+library(tidyverse)
+library(RColorBrewer)  # for custom color palettes
+```
+## Load Q file and check it is correct
+```bash
+Q <- read.table("fs_geno75.6.meanQ")
+colnames(Q) <- paste0("Pop", 1:ncol(Q))
+```
+## Read in sampleID file
+```bash
+sample_ids <- read.table("bamlist_nodupes.txt", header = FALSE, stringsAsFactors = FALSE)
+colnames(sample_ids) <- "SampleID"
+```
+## Assign sample IDs to Q
+```bash
+Q$SampleID <- sample_ids$SampleID
+head(Q)
+```
+## Read popmap
+```bash
+popmap <- read.table("pop_map_nodupes_final.txt", header = TRUE, stringsAsFactors = FALSE)
+```
+## Merge city info into Q
+```bash
+Q <- Q %>%
+  left_join(popmap[, c("sample", "city", "year")],
+            by = c("SampleID" = "sample"))
+```
+## Sort by city and year
+```bash
+Q <- Q %>% arrange(city, year)
+Q$Sample <- 1:nrow(Q)  # numeric index for plotting
+```
+## Convert to long format
+```bash
+Q_long <- Q %>%
+  pivot_longer(cols = starts_with("Pop"),
+               names_to = "Population",
+               values_to = "Ancestry")
+```
+## Make graph pretty 
+```bash
+#set city colors and boundaries
+K <- length(grep("Pop", colnames(Q)))
+pop_colors <- brewer.pal(K, "Set2")
+
+# Vertical lines between cities
+city_breaks <- Q %>%
+  group_by(city) %>%
+  summarize(end = max(Sample))
+
+# Midpoints for city labels
+city_labels <- Q %>%
+  group_by(city) %>%
+  summarize(mid = mean(Sample))
+```
+## Plot fastStructure bars sorted by city
+```bash
+ggplot(Q_long, aes(x = Sample, y = Ancestry, fill = Population)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = pop_colors) +
+  #Solid black lines that stop at bar height
+  geom_segment(data = city_breaks,
+               aes(x = end + 0.5,
+                   xend = end + 0.5,
+                   y = 0,
+                   yend = 1),
+               inherit.aes = FALSE,
+               color = "black",
+               linewidth = 0.6) +
+  #City labels under bars
+  geom_text(data = city_labels, aes(x = mid, y = -0.03, label = city),
+            inherit.aes = FALSE, angle = 45, hjust = 1, vjust = 1, size = 3) +
+  #Flip y-limits to give space for city labels
+  scale_y_continuous(expand = expansion(mult = c(0.2, 0.1))) +
+  theme_minimal() +
+  labs(x = "Individuals (grouped by city)", y = "Ancestry proportion", fill = "Cluster") +
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        plot.margin = margin(6, 6, 20, 6))  # extra bottom margin for labels
+```
+
